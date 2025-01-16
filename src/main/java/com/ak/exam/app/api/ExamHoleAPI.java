@@ -1,6 +1,8 @@
 package com.ak.exam.app.api;
 import com.ak.exam.app.dto.UserSeatDTO;
 import com.ak.exam.app.model.ExamHole;
+import com.ak.exam.app.model.ExamHoleAssignment;
+import com.ak.exam.app.service.ExamHoleAssignmentRequest;
 import com.ak.exam.app.service.ExamHoleService;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -9,6 +11,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
+
 import java.util.List;
 @RestController
 @RequestMapping("/api/v1/examhole")
@@ -16,6 +21,11 @@ public class ExamHoleAPI {
 
     @Autowired
     private ExamHoleService examHoleService;
+
+    @PostMapping("/assign-users")
+    public List<ExamHoleAssignment> assignUsersToExamHoles(@RequestBody List<ExamHoleAssignmentRequest> assignments) {
+        return examHoleService.assignUsersToExamHoles(assignments);
+    }
 
     // Create a new ExamHole
     @PostMapping("/addExamHole")
@@ -106,4 +116,37 @@ public class ExamHoleAPI {
     public static class SeatNumberRequest {
         private String seatNumber;
     }
+
+//    @PostMapping("/assignAllUsersToExamHole")
+//    // @PreAuthorize("hasRole('ADMIN')") // Uncomment if using Spring Security
+//    public ResponseEntity<String> assignAllUsersToExamHole(
+//            @RequestParam("examHoleId") Long examHoleId,
+//            @RequestParam("file") MultipartFile file) {
+//        try {
+//            examHoleService.assignUsersFromExcel(file, examHoleId);
+//            return ResponseEntity.ok("All users have been successfully assigned to the exam hall.");
+//        } catch (Exception e) {
+//            // The service layer throws ResponseStatusException, which Spring handles automatically.
+//            // However, you can customize error responses here if needed.
+//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to assign users: " + e.getMessage());
+//        }
+//    }
+
+    @PostMapping("/importUsersFromExcel/{examHoleId}")
+    public ResponseEntity<String> importUsersFromExcel(
+            @PathVariable Long examHoleId,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            List<ExamHoleAssignmentRequest> assignments = examHoleService.parseExcelFile(file, examHoleId);
+            examHoleService.assignUsersFromExcel(assignments);
+            return ResponseEntity.ok("All users have been successfully assigned to the exam hall.");
+        } catch (ResponseStatusException e) {
+            // Spring will handle this exception and return the appropriate response
+            throw e;
+        } catch (Exception e) {
+            // For any other exceptions
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Failed to import users: " + e.getMessage());
+        }
+    }
+
 }

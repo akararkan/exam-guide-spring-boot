@@ -83,7 +83,7 @@ public class UserService implements UserDetailsService {
                     .username(user.getUsername())
                     .email(user.getEmail())
                     .phone(user.getPhone())
-                    .password(passwordEncoder.encode(user.getPassword()))
+                    .password(user.getPassword())
                     .joinDate(new Date())
                     .isActive(true)
                     .isNotLocked(true)
@@ -122,49 +122,6 @@ public class UserService implements UserDetailsService {
         }
     }
 
-    private void sendVerificationEmail(User user, String siteURL)
-            throws MessagingException, UnsupportedEncodingException, MessagingException, UnsupportedEncodingException {
-        String toAddress = user.getEmail();
-        String fromAddress = "akar.arkanf19@gmail.com";
-        String senderName = "Kargay Hunar";
-        String subject = "Please verify your registration";
-        String content = "Dear [[name]],<br><br>"
-                + "<div style=\"background-color: #f9f9f9; padding: 20px; border-radius: 5px;\">"
-                + "    <p style=\"font-size: 16px; color: #333333;\">Please click the link below to verify your registration:</p>"
-                + "    <p style=\"text-align: center;\">"
-                + "        <a href=\"[[URL]]\" style=\""
-                + "            display: inline-block;"
-                + "            background-color: #007bff;"
-                + "            color: #ffffff;"
-                + "            text-decoration: none;"
-                + "            padding: 10px 20px;"
-                + "            border-radius: 5px;"
-                + "            margin-top: 15px;"
-                + "        \" target=\"_self\">VERIFY</a>"
-                + "    </p>"
-                + "</div>"
-                + "<br>"
-                + "<p style=\"font-size: 14px; color: #777777;\">Thank you,<br>Hunar factory for Marble Stone.</p>";
-
-
-        MimeMessage message = javaMailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(message);
-
-        helper.setFrom(fromAddress, senderName);
-        helper.setTo(toAddress);
-        helper.setSubject(subject);
-
-        content = content.replace("[[name]]", user.getFname() + " " + user.getLname());
-        String verifyURL = siteURL + "/api/v1/user/verify?code=" + user.getVerificationCode();
-
-        content = content.replace("[[URL]]", verifyURL);
-
-        helper.setText(content, true);
-
-        javaMailSender.send(message);
-
-        System.out.println("Email has been sent");
-    }
 
     public boolean verify(String verificationCode) {
         User user = userRepository.findByVerificationCode(verificationCode);
@@ -191,30 +148,54 @@ public class UserService implements UserDetailsService {
 
     public ResponseEntity<Token> login(User user) {
         try {
+            // Fetch the user by email
             Optional<User> optionalUser = userRepository.findByEmail(user.getEmail());
 
             if (optionalUser.isPresent()) {
                 User foundUser = optionalUser.get();
 
-                if (passwordEncoder.matches(user.getPassword(), foundUser.getPassword())) {
+                // Check if the password matches the stored plain password
+                if (user.getPassword().equals(foundUser.getPassword())) {
+
+                    // If the user is found and password matches, generate the JWT token
                     String jwtToken = jwtTokenProvider.generateToken(foundUser);
-                    return ResponseEntity.ok(new Token(jwtToken, "User Successfully logged in"));
+
+                    // Return the generated token in the response
+                    return ResponseEntity.ok(new Token(jwtToken, "User successfully logged in"));
                 } else {
-                    // Handle invalid password case
-                    throw new InvalidPasswordException("Invalid password");
+                    // If password doesn't match, throw an exception
+                    logger.error("Invalid password attempt for user: {}", user.getEmail());
+                    throw new InvalidPasswordException("Invalid password for user: " + user.getEmail());
                 }
             } else {
-                // Handle the case where user is not found
-                throw new UserNotFoundException("User not found");
+                // If no user is found with the provided email
+                logger.error("User not found with email: {}", user.getEmail());
+                throw new UserNotFoundException("User not found with email: " + user.getEmail());
             }
         } catch (UserNotFoundException e) {
-            // Log exception
-            logger.error("User not found: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new Token(e.getMessage()));
+            // Log and handle the case where the user is not found
+            logger.error("Error during login: {}", e.getMessage());
+            Token errorToken = Token.builder()
+                    .token(null)
+                    .response("Login failed: " + e.getMessage())
+                    .build();
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorToken);
         } catch (InvalidPasswordException e) {
-            // Log exception
-            logger.error("Invalid password: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new Token(e.getMessage()));
+            // Log and handle the case of invalid password
+            logger.error("Error during login: {}", e.getMessage());
+            Token errorToken = Token.builder()
+                    .token(null)
+                    .response("Login failed: " + e.getMessage())
+                    .build();
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorToken);
+        } catch (Exception e) {
+            // General exception handling
+            logger.error("Unexpected error during login: {}", e.getMessage());
+            Token errorToken = Token.builder()
+                    .token(null)
+                    .response("Login failed: " + e.getMessage())
+                    .build();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorToken);
         }
     }
 
@@ -254,6 +235,37 @@ public class UserService implements UserDetailsService {
 
         // Save and return updated user
         return userRepository.save(existingUser);
+    }
+
+    // Method to reset the password directly without tokens
+    public ResponseEntity<Token> resetPassword(String email, String newPassword) {
+        try {
+            // Find user by email
+            Optional<User> optionalUser = userRepository.findByEmail(email);
+
+            if (optionalUser.isPresent()) {
+                User user = optionalUser.get();
+
+                // Update the user's password directly
+                user.setPassword(newPassword);
+                userRepository.save(user);
+
+                // Return success response
+                Token response = Token.builder()
+                        .token(null)  // No token used here
+                        .response("Your password has been successfully reset.")
+                        .build();
+                return ResponseEntity.ok(response);
+            } else {
+                // User not found
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(new Token(null, "No user found with this email address"));
+            }
+        } catch (Exception e) {
+            logger.error("Error resetting password: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new Token(null, "Error resetting password: " + e.getMessage()));
+        }
     }
 
 

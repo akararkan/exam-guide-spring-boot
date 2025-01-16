@@ -6,6 +6,8 @@ import com.ak.exam.app.model.ExamHole;
 import com.ak.exam.app.model.ExamHoleAssignment;
 import com.ak.exam.user.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -21,4 +23,14 @@ public interface ExamHoleAssignmentRepository extends JpaRepository<ExamHoleAssi
     List<ExamHoleAssignment> findByExamHoleId(Long examHoleId);
 
     boolean existsByExamHoleAndUser(ExamHole examHole, User user);
+
+    @Query("SELECT MAX(a.seatNumber) FROM ExamHoleAssignment a WHERE a.examHole.id = :examHoleId")
+    Optional<String> findMaxSeatNumberByExamHoleId(@Param("examHoleId") Long examHoleId);
+
+    boolean existsByUserId(Long userId);
+
+
+    boolean existsByExamHoleIdAndSeatNumber(Long examHoleId, String seatNumber);
+    long countByExamHoleId(Long examHoleId);
+
 }

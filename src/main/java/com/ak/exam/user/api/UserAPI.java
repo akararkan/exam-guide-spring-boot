@@ -97,6 +97,11 @@ public class UserAPI {
         userService.deleteUser(id);
         return ResponseEntity.noContent().build();
     }
+    // Add the new endpoint for resetting the password
+    @PostMapping("/resetPassword")
+    public ResponseEntity<Token> resetPassword(@RequestParam String email, @RequestParam String newPassword) {
+        return userService.resetPassword(email, newPassword);
+    }
 
 
 }
