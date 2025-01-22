@@ -2,7 +2,7 @@ package com.ak.exam.app.api;
 
 import com.ak.exam.app.model.ExamHoleAssignment;
 import com.ak.exam.app.model.ExamSchedule;
-import com.ak.exam.app.service.ExamHoleAssignmentRequest;
+import com.ak.exam.app.dto.ExamHoleAssignmentRequest;
 import com.ak.exam.app.service.ExamScheduleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;

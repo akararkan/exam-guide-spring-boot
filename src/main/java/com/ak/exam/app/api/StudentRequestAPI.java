@@ -4,9 +4,17 @@ import com.ak.exam.app.dto.StudentRequestDTO;
 import com.ak.exam.app.model.StudentRequest;
 import com.ak.exam.app.service.StudentRequestService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 @RestController
@@ -18,9 +26,12 @@ public class StudentRequestAPI {
 
     // Endpoint to add a new StudentRequest
     @PostMapping("/addStudentRequest/{userId}")
-    public ResponseEntity<StudentRequestDTO> addStudentRequest( @RequestBody StudentRequest studentRequest, @PathVariable Long userId) {
+    public ResponseEntity<StudentRequestDTO> addStudentRequest(
+            @RequestPart("attachmentFile") MultipartFile attachmentFile,
+            @RequestPart("studentRequest") StudentRequest studentRequest,
+            @PathVariable Long userId) throws IOException {
         // Call the service method to add a new student request
-        return studentRequestService.addStudentRequest(studentRequest, userId);
+        return studentRequestService.addStudentRequest(studentRequest, userId, attachmentFile);
     }
 
     // Endpoint to get all StudentRequests
@@ -39,7 +50,10 @@ public class StudentRequestAPI {
 
     // Endpoint to update an existing StudentRequest
     @PutMapping("/updateStudentRequest/{id}/{userId}")
-    public ResponseEntity<StudentRequestDTO> updateStudentRequest(@PathVariable Long id, @PathVariable Long userId,  @RequestBody StudentRequest studentRequest) {
+    public ResponseEntity<StudentRequestDTO> updateStudentRequest(
+            @PathVariable Long id,
+            @PathVariable Long userId,
+            @RequestBody StudentRequest studentRequest) throws IOException {
         // Call the service method to update the student request
         return studentRequestService.updateStudentRequest(id, studentRequest, userId);
     }
@@ -50,4 +64,13 @@ public class StudentRequestAPI {
         // Call the service method to delete the student request
         return studentRequestService.deleteStudentRequest(id);
     }
+
+
+
+    // Endpoint to get the image by its filename
+    @GetMapping("/images/{fileName}")
+    public ResponseEntity<Resource> getImage(@PathVariable String fileName) throws IOException {
+        return studentRequestService.getImage(fileName);
+    }
+
 }

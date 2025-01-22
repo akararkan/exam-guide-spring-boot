@@ -1,5 +1,6 @@
 package com.ak.exam.app.service;
 
+import com.ak.exam.app.dto.ExamHoleAssignmentRequest;
 import com.ak.exam.app.model.ExamHole;
 import com.ak.exam.app.model.ExamHoleAssignment;
 import com.ak.exam.app.repo.ExamHoleAssignmentRepository;

@@ -22,6 +22,8 @@ public class StudentRequestDTO {
     private RequestStatus requestStatus;
     private Date createdAt;
     private Date updatedAt;
+    private String attachmentFile; // Store image URL as a string
+
 
     private UserDTO user; // Include UserDTO for associated user information
 }

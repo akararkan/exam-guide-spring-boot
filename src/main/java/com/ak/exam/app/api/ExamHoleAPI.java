@@ -2,7 +2,7 @@ package com.ak.exam.app.api;
 import com.ak.exam.app.dto.UserSeatDTO;
 import com.ak.exam.app.model.ExamHole;
 import com.ak.exam.app.model.ExamHoleAssignment;
-import com.ak.exam.app.service.ExamHoleAssignmentRequest;
+import com.ak.exam.app.dto.ExamHoleAssignmentRequest;
 import com.ak.exam.app.service.ExamHoleService;
 import lombok.AllArgsConstructor;
 import lombok.Data;

@@ -27,6 +27,7 @@ public class StudentRequest {
     private RequestStatus requestStatus;
     private Date createdAt;
     private Date updatedAt;
+    private String attachmentFile; // Store image URL as a string
 
     @ManyToOne
     @JoinColumn(name = "user_id", nullable = false)
