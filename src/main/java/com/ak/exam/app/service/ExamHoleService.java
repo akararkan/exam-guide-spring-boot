@@ -1,8 +1,10 @@
 package com.ak.exam.app.service;
 
 import com.ak.exam.app.dto.ExamHoleAssignmentRequest;
+import com.ak.exam.app.model.Department;
 import com.ak.exam.app.model.ExamHole;
 import com.ak.exam.app.model.ExamHoleAssignment;
+import com.ak.exam.app.repo.DepartmentRepository;
 import com.ak.exam.app.repo.ExamHoleAssignmentRepository;
 import com.ak.exam.app.repo.ExamHoleRepository;
 import com.ak.exam.app.dto.UserSeatDTO;
@@ -33,10 +35,12 @@ public class ExamHoleService {
     private final ExamHoleRepository examHoleRepository;
     private final UserRepository userRepository;
     private final ExamHoleAssignmentRepository assignmentRepository;
+    private final DepartmentRepository departmentRepository;
 
     // Define a pattern for seat number validation (e.g., "A1", "B2")
     private static final Pattern SEAT_NUMBER_PATTERN = Pattern.compile("^[A-Z]\\d+$");
     private static final Logger logger = LoggerFactory.getLogger(ExamHoleService.class);
+    private final ExamHoleAssignmentRepository examHoleAssignmentRepository;
 
     // Create a new ExamHole
     public ResponseEntity<ExamHole> addExamHole(ExamHole examHole) {
@@ -556,5 +560,81 @@ public class ExamHoleService {
         }
     }
 
+    public void distributeUsersToSeats(Long examHoleID) {
+        // Get users by department level
+        List<Department> level4Departments = departmentRepository.findByLevel(4);
+        List<Department> level2Departments = departmentRepository.findByLevel(2);
+
+        // Get all users for level 4 departments
+        List<User> level4Users = level4Departments.stream()
+                .flatMap(dept -> userRepository.findByDepartment(dept).stream())
+                .collect(Collectors.toList());
+
+        // Get all users for level 2 departments
+        List<User> level2Users = level2Departments.stream()
+                .flatMap(dept -> userRepository.findByDepartment(dept).stream())
+                .collect(Collectors.toList());
+
+        // Define seating pattern (Only A, C, E, G, I, K)
+        String[] columns = {"A", "C", "E", "G", "I", "K"};
+        int totalRows = 8;
+        int maxStudents = 56; // Maximum students allowed in the exam hole
+
+        int currentUserIndex4 = 0;
+        int currentUserIndex2 = 0;
+        int assignedStudents = 0;
+
+        // Fetch the exam hole
+        ExamHole examHole = examHoleRepository.findById(examHoleID).orElse(null);
+        if (examHole == null || examHole.getAvailableSlots() == 0) {
+            throw new RuntimeException("Exam hole not found or has no available slots.");
+        }
+
+        // For each column in A, C, E, G, I, K
+        for (String currentColumn : columns) {
+            for (int row = 1; row <= totalRows; row++) {
+                if (assignedStudents >= maxStudents) {
+                    return; // Stop assigning if max limit reached
+                }
+
+                String seatNumber = currentColumn + row;
+                User userToAssign = null;
+
+                // Assign users in a pattern
+                if (row % 2 == 0) { // Even rows for level 2 users
+                    if (currentUserIndex2 < level2Users.size()) {
+                        userToAssign = level2Users.get(currentUserIndex2++);
+                    }
+                } else { // Odd rows for level 4 users
+                    if (currentUserIndex4 < level4Users.size()) {
+                        userToAssign = level4Users.get(currentUserIndex4++);
+                    }
+                }
+
+                // Assign user to seat
+                if (userToAssign != null) {
+                    try {
+                        ExamHoleAssignment assignment = ExamHoleAssignment.builder()
+                                .examHole(examHole)
+                                .user(userToAssign)
+                                .seatNumber(seatNumber)
+                                .build();
+
+                        examHoleAssignmentRepository.save(assignment);
+
+                        // Update available slots
+                        examHole.setAvailableSlots(examHole.getAvailableSlots() - 1);
+                        examHoleRepository.save(examHole);
+
+                        assignedStudents++; // Increment the count of assigned students
+
+                    } catch (Exception e) {
+                        throw new RuntimeException("Error assigning seat " + seatNumber +
+                                " to user " + userToAssign.getFname() + ": " + e.getMessage());
+                    }
+                }
+            }
+        }
+    }
 
 }

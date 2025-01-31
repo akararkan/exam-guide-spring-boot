@@ -32,5 +32,5 @@ public interface ExamHoleAssignmentRepository extends JpaRepository<ExamHoleAssi
 
     boolean existsByExamHoleIdAndSeatNumber(Long examHoleId, String seatNumber);
     long countByExamHoleId(Long examHoleId);
-
+    boolean existsByExamHoleAndSeatNumber(ExamHole examHole, String seatNumber);
 }

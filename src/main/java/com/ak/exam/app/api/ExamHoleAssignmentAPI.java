@@ -6,6 +6,7 @@ import com.ak.exam.app.model.ExamHole;
 import com.ak.exam.app.model.ExamHoleAssignment;
 import com.ak.exam.app.repo.ExamHoleAssignmentRepository;
 import com.ak.exam.app.repo.ExamHoleRepository;
+import com.ak.exam.app.service.ExamHoleService;
 import com.ak.exam.user.model.User;
 import com.ak.exam.user.repo.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class ExamHoleAssignmentAPI {
     private final ExamHoleAssignmentRepository examHoleAssignmentRepository;
     private final UserRepository userRepository;
     private final ExamHoleRepository   examHoleRepository;
+    private final ExamHoleService examHoleService;
 
     // Method to get ExamHoleAssignment by ExamHoleId and SeatNumber using path variables
     @GetMapping("/get/{examHoleId}/{seatNumber}")
@@ -177,6 +179,10 @@ public class ExamHoleAssignmentAPI {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error updating seat number: " + e.getMessage());
         }
+    }
+    @PostMapping("/assign-users/{examHoleID}")
+    public void assignSeats(@PathVariable Long examHoleID){
+        examHoleService.distributeUsersToSeats(examHoleID);
     }
 
 

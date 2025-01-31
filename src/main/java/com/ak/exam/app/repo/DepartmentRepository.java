@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface DepartmentRepository extends JpaRepository<Department, Long> {
     List<Department> findByNameContainingIgnoreCase(String name);  // Method to search by name (case-insensitive)
+    List<Department> findByLevel(Integer level);
 }
