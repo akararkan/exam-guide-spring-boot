@@ -560,59 +560,67 @@ public class ExamHoleService {
         }
     }
 
+    // bo chak krdn
+
     public void distributeUsersToSeats(Long examHoleID) {
-        // Get users by department level
-        List<Department> level4Departments = departmentRepository.findByLevel(4);
-        List<Department> level2Departments = departmentRepository.findByLevel(2);
+        // Specific department order for seating
+        List<String> departmentOrder = Arrays.asList(
+                "IT 4", "Gashtw Guzar 4", "Darayy w Bank 4",
+                "IT 2", "Gashtw Guzar 2", "Darayy w Bank 2"
+        );
 
-        // Get all users for level 4 departments
-        List<User> level4Users = level4Departments.stream()
-                .flatMap(dept -> userRepository.findByDepartment(dept).stream())
-                .collect(Collectors.toList());
+        // Validate exam hole
+        ExamHole examHole = examHoleRepository.findById(examHoleID)
+                .orElseThrow(() -> new RuntimeException("Exam hole not found"));
 
-        // Get all users for level 2 departments
-        List<User> level2Users = level2Departments.stream()
-                .flatMap(dept -> userRepository.findByDepartment(dept).stream())
-                .collect(Collectors.toList());
+        // Prepare to collect users for each department
+        Map<String, List<User>> departmentUsersMap = new HashMap<>();
+
+        // Collect users for each department (only unassigned)
+        for (String departmentName : departmentOrder) {
+            Department department = departmentRepository.findByName(departmentName);
+            if (department == null) {
+                department = departmentRepository.findFirstByNameContainingIgnoreCase(departmentName)
+                        .orElseThrow(() -> new RuntimeException("Department not found: " + departmentName));
+            }
+
+            // Fetch UNASSIGNED users for this department
+            List<User> departmentUsers = userRepository.findByDepartmentAndNotAssigned(department);
+            departmentUsersMap.put(departmentName, departmentUsers);
+        }
 
         // Define seating pattern (Only A, C, E, G, I, K)
         String[] columns = {"A", "C", "E", "G", "I", "K"};
         int totalRows = 8;
-        int maxStudents = 56; // Maximum students allowed in the exam hole
+        int maxStudents = examHole.getAvailableSlots(); // Use the exam hole's available slots
 
-        int currentUserIndex4 = 0;
-        int currentUserIndex2 = 0;
+        // Clear existing assignments for this exam hole (uncomment if needed)
+        // examHoleAssignmentRepository.deleteByExamHole(examHole);
+
+        // Tracking variables
         int assignedStudents = 0;
 
-        // Fetch the exam hole
-        ExamHole examHole = examHoleRepository.findById(examHoleID).orElse(null);
-        if (examHole == null || examHole.getAvailableSlots() == 0) {
-            throw new RuntimeException("Exam hole not found or has no available slots.");
-        }
+        // Start with seat A1
+        int currentRow = 1;
+        int departmentIndex = 0;
 
-        // For each column in A, C, E, G, I, K
+        // Seat assignment loop for each column
         for (String currentColumn : columns) {
-            for (int row = 1; row <= totalRows; row++) {
+            currentRow = 1; // Reset row for each column
+
+            // Assign users per column
+            while (currentRow <= 6) {
                 if (assignedStudents >= maxStudents) {
-                    return; // Stop assigning if max limit reached
+                    return; // Stop if max students reached
                 }
 
-                String seatNumber = currentColumn + row;
-                User userToAssign = null;
+                String currentDepartment = departmentOrder.get(departmentIndex);
+                List<User> departmentUsers = departmentUsersMap.get(currentDepartment);
 
-                // Assign users in a pattern
-                if (row % 2 == 0) { // Even rows for level 2 users
-                    if (currentUserIndex2 < level2Users.size()) {
-                        userToAssign = level2Users.get(currentUserIndex2++);
-                    }
-                } else { // Odd rows for level 4 users
-                    if (currentUserIndex4 < level4Users.size()) {
-                        userToAssign = level4Users.get(currentUserIndex4++);
-                    }
-                }
+                if (!departmentUsers.isEmpty()) {
+                    String seatNumber = currentColumn + currentRow;
+                    User userToAssign = departmentUsers.remove(0);
 
-                // Assign user to seat
-                if (userToAssign != null) {
                     try {
                         ExamHoleAssignment assignment = ExamHoleAssignment.builder()
                                 .examHole(examHole)
@@ -626,15 +634,22 @@ public class ExamHoleService {
                         examHole.setAvailableSlots(examHole.getAvailableSlots() - 1);
                         examHoleRepository.save(examHole);
 
-                        assignedStudents++; // Increment the count of assigned students
-
+                        assignedStudents++;
                     } catch (Exception e) {
-                        throw new RuntimeException("Error assigning seat " + seatNumber +
-                                " to user " + userToAssign.getFname() + ": " + e.getMessage());
+                        System.err.println("Error assigning seat " + seatNumber + ": " + e.getMessage());
                     }
                 }
+
+                // Move to next department
+                departmentIndex = (departmentIndex + 1) % departmentOrder.size();
+                currentRow++;
             }
         }
+
+        // Final save
+        examHoleRepository.save(examHole);
     }
+
+
 
 }

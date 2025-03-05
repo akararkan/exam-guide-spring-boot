@@ -51,6 +51,52 @@ public class UserService implements UserDetailsService {
 
     private static final Logger logger = LoggerFactory.getLogger(UserService.class);
 
+//    public ResponseEntity<Token> addAllUsers(List<User> users, Long departmentId) {
+//        try {
+//            // Fetch the department using the departmentId
+//            Department department = departmentRepository.findById(departmentId)
+//                    .orElseThrow(() -> new RuntimeException("Department not found"));
+//
+//            // Iterate through each user and transform it using the Builder pattern
+//            List<User> newUsers = users.stream().map(user ->
+//                    User.builder()
+//                            .fname(user.getFname())
+//                            .lname(user.getLname())
+//                            .username(user.getUsername())
+//                            .email(user.getEmail())
+//                            .password(user.getPassword()) // Ensure encryption if needed
+//                            .phone(user.getPhone())
+//                            .joinDate(new Date())
+//                            .isActive(true)
+//                            .isNotLocked(true)
+//                            .isEnabled(false)
+//                            .isVerified(false)
+//                            .role(user.getRole())
+//                            .authorities(Collections.singletonList(user.getRole().getAuthorities().toString()))
+//                            .department(department)
+//                            .createDate(new Date())
+//                            .build()
+//            ).toList();
+//
+//            // Save all users in batch
+//            userRepository.saveAll(newUsers);
+//
+//            // Return success response
+//            Token response = Token.builder()
+//                    .token(null)
+//                    .response(newUsers.size() + " users added successfully.")
+//                    .build();
+//
+//            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+//
+//        } catch (Exception e) {
+//            logger.error("Error adding users: {}", e.getMessage());
+//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+//                    .body(new Token(null, "Error adding users: " + e.getMessage()));
+//        }
+//    }
+
+
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
