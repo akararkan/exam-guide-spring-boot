@@ -10,22 +10,34 @@ import com.ak.exam.app.repo.ExamHoleRepository;
 import com.ak.exam.app.dto.UserSeatDTO;
 import com.ak.exam.user.model.User;
 import com.ak.exam.user.repo.UserRepository;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import static com.ak.exam.user.enums.Role.STUDENT;
+import static com.ak.exam.user.enums.Role.TEACHER;
 
 @Service
 @Transactional
@@ -36,6 +48,9 @@ public class ExamHoleService {
     private final UserRepository userRepository;
     private final ExamHoleAssignmentRepository assignmentRepository;
     private final DepartmentRepository departmentRepository;
+
+    @Autowired
+    private JavaMailSender mailSender;
 
     // Define a pattern for seat number validation (e.g., "A1", "B2")
     private static final Pattern SEAT_NUMBER_PATTERN = Pattern.compile("^[A-Z]\\d+$");
@@ -122,20 +137,24 @@ public class ExamHoleService {
     }
 
     // Add User to ExamHole with Seat Number
-    public ResponseEntity<String> addUserToExamHole(Long examHoleId, Long userId, String seatNumber) { // Changed Integer to String
+    public ResponseEntity<String> addUserToExamHole(Long examHoleId, Long userId, String seatNumber) {
         ExamHole examHole = examHoleRepository.findById(examHoleId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Exam Hall not found"));
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-        // Validate seat number format
+        // Validate and normalize seat number
         if (seatNumber == null || seatNumber.trim().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Seat number cannot be empty");
         }
 
-        if (!SEAT_NUMBER_PATTERN.matcher(seatNumber).matches()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid seat number format. Expected format like 'A1', 'B2', etc.");
+        // Normalize seat number - trim and convert to uppercase
+        seatNumber = seatNumber.trim().toUpperCase();
+
+        // For teachers, use "Teacher Stage" as the seat number
+        if (user.getRole() == TEACHER) {
+            seatNumber = "Teacher Stage";
         }
 
         // Check if seat number is already taken
@@ -159,7 +178,7 @@ public class ExamHoleService {
         ExamHoleAssignment assignment = ExamHoleAssignment.builder()
                 .examHole(examHole)
                 .user(user)
-                .seatNumber(seatNumber)
+                .seatNumber(seatNumber) // Use normalized seat number
                 .build();
 
         assignmentRepository.save(assignment);
@@ -194,17 +213,24 @@ public class ExamHoleService {
     }
 
     // Edit User's Seat Number in ExamHole
-    public ResponseEntity<String> editUserSeatInExamHole(Long examHoleId, Long userId, String newSeatNumber) { // Changed Integer to String
+    public ResponseEntity<String> editUserSeatInExamHole(Long examHoleId, Long userId, String newSeatNumber) {
         ExamHole examHole = examHoleRepository.findById(examHoleId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Exam Hall not found"));
 
-        // Validate new seat number format
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        // Validate and normalize seat number
         if (newSeatNumber == null || newSeatNumber.trim().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Seat number cannot be empty");
         }
 
-        if (!SEAT_NUMBER_PATTERN.matcher(newSeatNumber).matches()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid seat number format. Expected format like 'A1', 'B2', etc.");
+        // Normalize seat number - trim and convert to uppercase
+        newSeatNumber = newSeatNumber.trim().toUpperCase();
+
+        // For teachers, always use "Teacher Stage"
+        if (user.getRole() == TEACHER) {
+            newSeatNumber = "Teacher Stage";
         }
 
         // Find the existing assignment
@@ -269,9 +295,9 @@ public class ExamHoleService {
     }
 
 
-
     /**
      * Assigns multiple users to multiple exam holes with automatic seat numbering
+     *
      * @param assignments List of assignment requests containing user IDs and exam hole IDs
      * @return List of created ExamHoleAssignments
      */
@@ -306,11 +332,19 @@ public class ExamHoleService {
                     throw new IllegalStateException("User " + user.getId() + " is already assigned to an exam hole");
                 }
 
+                // Set seat number based on role
+                String seatNumber;
+                if (user.getRole() == TEACHER) {
+                    seatNumber = "Teacher Stage";
+                } else {
+                    seatNumber = String.format("%03d", nextSeatNumber++); // Format: 001, 002, etc.
+                }
+
                 // Create and save the assignment
                 ExamHoleAssignment assignment = ExamHoleAssignment.builder()
                         .examHole(examHole)
                         .user(user)
-                        .seatNumber(String.format("%03d", nextSeatNumber++)) // Format: 001, 002, etc.
+                        .seatNumber(seatNumber)
                         .build();
 
                 createdAssignments.add(assignmentRepository.save(assignment));
@@ -354,6 +388,13 @@ public class ExamHoleService {
                 logger.error("Exam Hall ID {} is already full.", examHole.getId());
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Exam Hall is already full.");
             }
+
+            // For teachers, always use "Teacher Stage" as seat number
+            String seatNumber = request.getSeatNumber();
+            if (user.getRole() == TEACHER) {
+                seatNumber = "Teacher Stage";
+            }
+
             // Update the available capacity of the exam hole
             int availableSlots = examHole.getCapacity() - (int) currentAssignments - 1; // Subtract 1 for the new user
             examHole.setAvailableSlots(availableSlots);
@@ -361,15 +402,14 @@ public class ExamHoleService {
 
             // Create and save assignment
             ExamHoleAssignment assignment = ExamHoleAssignment.builder()
-
                     .examHole(examHole)
                     .user(user)
-                    .seatNumber(request.getSeatNumber())
+                    .seatNumber(seatNumber)
                     .build();
 
             assignmentRepository.save(assignment);
             logger.info("Assigned userId={} to examHoleId={} at seatNumber={}",
-                    user.getId(), examHole.getId(), request.getSeatNumber());
+                    user.getId(), examHole.getId(), seatNumber);
         }
     }
 
@@ -480,10 +520,9 @@ public class ExamHoleService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     String.format("Missing seat number at row %d", rowNumber + 1));
         }
-        if (!seatNumber.matches("^[A-Z]\\d+$")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    String.format("Invalid seat number format '%s' at row %d", seatNumber, rowNumber + 1));
-        }
+
+        // Normalize seat number - trim and convert to uppercase
+        seatNumber = seatNumber.trim().toUpperCase();
 
         // Validate and parse exam hole ID
         Long excelExamHoleId = parseLongValue(examHoleIdCell, "examHoleId", rowNumber + 1);
@@ -503,9 +542,18 @@ public class ExamHoleService {
         return ExamHoleAssignmentRequest.builder()
                 .userId(userId)
                 .examHoleId(examHoleId)
-                .seatNumber(seatNumber.trim())
+                .seatNumber(seatNumber) // Using the normalized seat number
                 .rowNumber(rowNumber + 1)
                 .build();
+    }
+
+    /**
+     * Validates if a seat number is in the correct format
+     * Accepts any string, including "Teacher Stage" for teachers
+     */
+    private boolean isValidSeatNumber(String seatNumber) {
+        // Accept any seat number that is not null or empty
+        return seatNumber != null && !seatNumber.isEmpty();
     }
 
     private Long parseLongValue(Cell cell, String fieldName, int rowNumber) {
@@ -560,112 +608,409 @@ public class ExamHoleService {
         }
     }
 
-    // bo chak krdn
-    public void distributeUsersToSeats(Long examHoleID) {
-        // Specific department order for seating
-        List<String> level4Departments = Arrays.asList(
-                "IT 4", "Gashtw Guzar 4", "Darayy w Bank 4"
-        );
+    /**
+     * Dynamically distributes users to seats in an exam hole based on selected departments and level grouping
+     *
+     * @param examHoleID          The ID of the exam hole to distribute students to
+     * @param selectedDepartments List of department names to include in the distribution
+     * @param firstLevelGroup     The first level group to assign (e.g., 1 and 3)
+     * @param secondLevelGroup    The second level group to assign (e.g., 2 and 4)
+     */
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
+    public void distributeUsersToSeats(Long examHoleID, List<String> selectedDepartments,
+                                       List<Integer> firstLevelGroup, List<Integer> secondLevelGroup) {
+        try {
+            // Validate exam hole
+            ExamHole examHole = examHoleRepository.findById(examHoleID)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Exam Hall not found"));
 
-        List<String> level2Departments = Arrays.asList(
-                "IT 2", "Gashtw Guzar 2", "Darayy w Bank 2"
-        );
+            logger.info("Starting seat distribution for Exam Hall: {}", examHole.getHoleName());
+            logger.info("First level group: {}, Second level group: {}", firstLevelGroup, secondLevelGroup);
 
-        // Validate exam hole
-        ExamHole examHole = examHoleRepository.findById(examHoleID)
-                .orElseThrow(() -> new RuntimeException("Exam hole not found"));
+            // Define seating columns as per requirements
+            List<String> seatingColumns = Arrays.asList("A", "C", "D", "G", "I", "J", "L");
 
-        // Prepare to collect users for each department
-        Map<String, List<User>> departmentUsersMap = new HashMap<>();
-
-        // Collect users for each department (only unassigned)
-        for (String departmentName : level4Departments) {
-            collectUsersForDepartment(departmentName, departmentUsersMap);
-        }
-
-        for (String departmentName : level2Departments) {
-            collectUsersForDepartment(departmentName, departmentUsersMap);
-        }
-
-        // Define seating columns based on the image
-        String[] columns = {"A", "C", "E", "G", "I", "K"};
-        int maxRows = 8;
-        int maxStudents = examHole.getAvailableSlots(); // Use the exam hole's available slots
-
-        // Tracking variables
-        int assignedStudents = 0;
-        int level4DeptIndex = 0;
-        int level2DeptIndex = 0;
-
-        // Iterate through columns first
-        for (int columnIndex = 0; columnIndex < columns.length; columnIndex++) {
-            String currentColumn = columns[columnIndex];
-
-            // Determine whether this column is for level 4 or level 2
-            boolean isLevel4Column = columnIndex % 2 == 0; // Even columns (0, 2, 4) for level 4
-            List<String> departmentsToUse = isLevel4Column ? level4Departments : level2Departments;
-
-            // Reference to the correct department index
-            int deptIndex = isLevel4Column ? level4DeptIndex : level2DeptIndex;
-
-            // Assign seats for all rows in this column
-            for (int currentRow = 1; currentRow <= maxRows; currentRow++) {
-                if (assignedStudents >= maxStudents) {
-                    examHoleRepository.save(examHole);
-                    return; // Stop if max students reached
-                }
-
-                String currentDepartment = departmentsToUse.get(deptIndex);
-                deptIndex = (deptIndex + 1) % departmentsToUse.size();
-
-                // Update the correct department index for future columns
-                if (isLevel4Column) {
-                    level4DeptIndex = deptIndex;
-                } else {
-                    level2DeptIndex = deptIndex;
-                }
-
-                List<User> departmentUsers = departmentUsersMap.get(currentDepartment);
-
-                if (departmentUsers != null && !departmentUsers.isEmpty()) {
-                    String seatNumber = currentColumn + currentRow;
-                    User userToAssign = departmentUsers.remove(0);
-
-                    try {
-                        ExamHoleAssignment assignment = ExamHoleAssignment.builder()
-                                .examHole(examHole)
-                                .user(userToAssign)
-                                .seatNumber(seatNumber)
-                                .build();
-
-                        examHoleAssignmentRepository.save(assignment);
-
-                        // Update available slots
-                        examHole.setAvailableSlots(examHole.getAvailableSlots() - 1);
-                        assignedStudents++;
-                    } catch (Exception e) {
-                        System.err.println("Error assigning seat " + seatNumber + ": " + e.getMessage());
-                    }
+            // Validate columns are valid
+            for (String column : seatingColumns) {
+                if (!column.matches("[A-Z]")) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Invalid column format: " + column + ". Columns must be uppercase letters.");
                 }
             }
-        }
 
-        // Final save
-        examHoleRepository.save(examHole);
+            // Group departments by level
+            Map<Integer, List<String>> departmentsByLevel = new HashMap<>();
+
+            for (String deptName : selectedDepartments) {
+                int level = extractLevel(deptName);
+                departmentsByLevel.computeIfAbsent(level, k -> new ArrayList<>()).add(deptName);
+                logger.info("Added department {} to level {}", deptName, level);
+            }
+
+            // Collect departments for each group based on the provided level groups
+            List<String> group1Departments = new ArrayList<>();
+            List<String> group2Departments = new ArrayList<>();
+
+            // Collect departments for first level group
+            for (Integer level : firstLevelGroup) {
+                if (departmentsByLevel.containsKey(level)) {
+                    group1Departments.addAll(departmentsByLevel.get(level));
+                }
+            }
+
+            // Collect departments for second level group
+            for (Integer level : secondLevelGroup) {
+                if (departmentsByLevel.containsKey(level)) {
+                    group2Departments.addAll(departmentsByLevel.get(level));
+                }
+            }
+
+            logger.info("Group 1 (Levels {}) departments: {}", firstLevelGroup, group1Departments);
+            logger.info("Group 2 (Levels {}) departments: {}", secondLevelGroup, group2Departments);
+
+            // Define the maximum number of students
+            final int TOTAL_CAPACITY = 56; // 7 columns × 8 rows
+            int maxRows = 8;
+
+            // Map to store users by department for efficient lookup
+            Map<String, Queue<User>> departmentUsersMap = new HashMap<>();
+
+            // First, assign teachers to "Teacher Stage"
+            int teachersAssigned = 0;
+
+            // Collect all users for all departments
+            for (String departmentName : selectedDepartments) {
+                List<User> allUsers = collectUsersForDepartment(departmentName);
+
+                // Separate teachers and students
+                Queue<User> departmentUsers = new LinkedList<>();
+
+                for (User user : allUsers) {
+                    if (user.getRole() == TEACHER) {
+                        // Assign teachers to "Teacher Stage" immediately
+                        try {
+                            if (assignUserToSeat(examHole, user, "Teacher Stage", departmentName, new HashSet<>(), new HashMap<>())) {
+                                teachersAssigned++;
+                                logger.info("Assigned teacher {} to Teacher Stage", user.getFname() + " " + user.getLname());
+                            }
+                        } catch (Exception e) {
+                            logger.error("Error assigning teacher to Teacher Stage: {}", e.getMessage());
+                        }
+                    } else {
+                        // Queue students for later assignment
+                        departmentUsers.add(user);
+                    }
+                }
+
+                departmentUsersMap.put(departmentName, departmentUsers);
+                logger.info("Collected {} students for department {}", departmentUsers.size(), departmentName);
+            }
+
+            logger.info("Assigned {} teachers to Teacher Stage", teachersAssigned);
+
+            // Set to track emails for notification
+            Set<String> userEmails = new HashSet<>();
+            Map<Long, String> userSeatMap = new HashMap<>(); // Store user ID -> seat number for emails
+
+            // Initialize counters
+            int totalAssigned = teachersAssigned; // Include teachers in total
+            int group1DeptIndex = 0;
+            int group2DeptIndex = 0;
+
+            // Distribute students alternating between group 1 and group 2
+            // Group 1 will be placed in even-indexed columns (0-based): A, D, I, L
+            // Group 2 will be placed in odd-indexed columns (0-based): C, G, J
+            for (int colIndex = 0; colIndex < seatingColumns.size(); colIndex++) {
+                String column = seatingColumns.get(colIndex);
+                boolean isEvenColumn = colIndex % 2 == 0;
+
+                List<String> currentDepartments = isEvenColumn ? group1Departments : group2Departments;
+                if (currentDepartments.isEmpty()) {
+                    logger.info("No departments for column {} (group {})", column, isEvenColumn ? 1 : 2);
+                    continue;
+                }
+
+                int deptIndex = isEvenColumn ? group1DeptIndex : group2DeptIndex;
+
+                logger.info("Assigning students to column {} from group {}", column, isEvenColumn ? 1 : 2);
+
+                // Assign students row by row in this column
+                for (int row = 1; row <= maxRows; row++) {
+                    if (totalAssigned >= TOTAL_CAPACITY) {
+                        logger.info("Reached maximum capacity of {} students", TOTAL_CAPACITY);
+                        break;
+                    }
+
+                    // Ensure we have a valid department index
+                    if (currentDepartments.isEmpty()) break;
+                    deptIndex = deptIndex % currentDepartments.size();
+
+                    String departmentName = currentDepartments.get(deptIndex);
+                    Queue<User> users = departmentUsersMap.get(departmentName);
+
+                    // Try to find an available user
+                    User userToAssign = findNextAvailableUser(users);
+
+                    // If no user in current department, try others in the same group
+                    if (userToAssign == null) {
+                        boolean foundUser = false;
+
+                        // Try a complete loop through all departments in this group
+                        int originalDeptIndex = deptIndex;
+                        do {
+                            deptIndex = (deptIndex + 1) % currentDepartments.size();
+                            departmentName = currentDepartments.get(deptIndex);
+                            users = departmentUsersMap.get(departmentName);
+                            userToAssign = findNextAvailableUser(users);
+
+                            if (userToAssign != null) {
+                                foundUser = true;
+                                break;
+                            }
+                        } while (deptIndex != originalDeptIndex);
+
+                        if (!foundUser) {
+                            logger.debug("No available users for column {} row {}", column, row);
+                            continue;
+                        }
+                    }
+
+                    // Create seat number
+                    String seatNumber = column + row;
+
+                    try {
+                        if (assignUserToSeat(examHole, userToAssign, seatNumber, departmentName, userEmails, userSeatMap)) {
+                            totalAssigned++;
+                        }
+                    } catch (Exception e) {
+                        logger.error("Error assigning user to seat {}: {}", seatNumber, e.getMessage());
+                        // Continue with next user
+                    }
+
+                    // Move to next department for next row
+                    deptIndex = (deptIndex + 1) % currentDepartments.size();
+                }
+
+                // Update the appropriate department index
+                if (isEvenColumn) {
+                    group1DeptIndex = deptIndex;
+                } else {
+                    group2DeptIndex = deptIndex;
+                }
+            }
+
+            // Update exam hole available slots in a separate transaction
+            updateExamHoleCapacity(examHoleID, totalAssigned);
+
+            // Send email notifications
+            if (!userEmails.isEmpty()) {
+                sendEmailNotifications(examHole, userEmails, userSeatMap);
+            }
+
+            logger.info("Completed seat distribution. Total users assigned: {}", totalAssigned);
+        } catch (Exception e) {
+            logger.error("Error during seat distribution: {}", e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to distribute seats: " + e.getMessage());
+        }
     }
 
-    // Helper method to find and collect users for a department
-    private void collectUsersForDepartment(String departmentName, Map<String, List<User>> departmentUsersMap) {
+    /**
+     * Updates the exam hole capacity in a separate transaction
+     */
+    @org.springframework.transaction.annotation.Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void updateExamHoleCapacity(Long examHoleId, int assignedCount) {
+        try {
+            ExamHole examHole = examHoleRepository.findById(examHoleId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Exam Hall not found"));
+            examHole.setAvailableSlots(examHole.getCapacity() - assignedCount);
+            examHoleRepository.save(examHole);
+            logger.info("Updated exam hole {} available slots to {}",
+                    examHoleId, examHole.getAvailableSlots());
+        } catch (Exception e) {
+            logger.error("Error updating exam hole capacity: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Overloaded method for backward compatibility and convenience using the default level groups (1&3, 2&4)
+     */
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
+    public void distributeUsersToSeats(Long examHoleID, List<String> selectedDepartments) {
+        // Default to the original grouping: Levels 1&3 in first group, Levels 2&4 in second group
+        List<Integer> firstLevelGroup = Arrays.asList(1, 3);
+        List<Integer> secondLevelGroup = Arrays.asList(2, 4);
+
+        distributeUsersToSeats(examHoleID, selectedDepartments, firstLevelGroup, secondLevelGroup);
+    }
+
+    /**
+     * Collects users for a specific department, including both STUDENT and TEACHER roles
+     * Only includes those not assigned to any exam hole
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    protected List<User> collectUsersForDepartment(String departmentName) {
         Department department = departmentRepository.findByName(departmentName);
         if (department == null) {
             department = departmentRepository.findFirstByNameContainingIgnoreCase(departmentName)
-                    .orElseThrow(() -> new RuntimeException("Department not found: " + departmentName));
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                            "Department not found: " + departmentName));
         }
 
-        // Fetch UNASSIGNED users for this department
-        List<User> departmentUsers = userRepository.findByDepartmentAndNotAssigned(department);
-        departmentUsersMap.put(departmentName, departmentUsers);
+        // Fetch all users from this department (both STUDENTS and TEACHERS)
+        List<User> departmentUsers = userRepository.findByDepartment(department);
+
+        // Filter out users who are already assigned to any exam hole
+        List<User> unassignedUsers = new ArrayList<>();
+        for (User user : departmentUsers) {
+            if (!assignmentRepository.existsByUserId(user.getId())) {
+                unassignedUsers.add(user);
+            }
+        }
+
+        logger.info("Found {} unassigned users out of {} total in department {}",
+                unassignedUsers.size(), departmentUsers.size(), departmentName);
+
+        return unassignedUsers;
     }
 
+    /**
+     * Find the next available user in a queue
+     */
+    private User findNextAvailableUser(Queue<User> users) {
+        if (users == null || users.isEmpty()) {
+            return null;
+        }
 
+        return users.poll();
+    }
+
+    /**
+     * Assign a user to a specific seat
+     */
+    @org.springframework.transaction.annotation.Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean assignUserToSeat(ExamHole examHole, User user, String seatNumber,
+                                    String departmentName, Set<String> userEmails,
+                                    Map<Long, String> userSeatMap) {
+        try {
+            // For teachers, always use "Teacher Stage"
+            if (user.getRole() == TEACHER) {
+                seatNumber = "Teacher Stage";
+            }
+
+            // Check if seat is already taken
+            if (assignmentRepository.existsByExamHoleIdAndSeatNumber(examHole.getId(), seatNumber)) {
+                logger.warn("Seat {} is already taken in exam hole {}", seatNumber, examHole.getId());
+                return false;
+            }
+
+            // Double-check if user is already assigned to any exam hole
+            if (assignmentRepository.existsByUserId(user.getId())) {
+                logger.warn("User {} is already assigned to a seat in some exam hole", user.getId());
+                return false;
+            }
+
+            // Create the assignment
+            ExamHoleAssignment assignment = ExamHoleAssignment.builder()
+                    .examHole(examHole)
+                    .user(user)
+                    .seatNumber(seatNumber)
+                    .build();
+
+            assignmentRepository.save(assignment);
+
+            // Add email for notification
+            if (user.getEmail() != null && !user.getEmail().isEmpty()) {
+                userEmails.add(user.getEmail());
+                userSeatMap.put(user.getId(), seatNumber);
+            }
+
+            logger.info("Assigned user {} (ID: {}) to {} in department {}",
+                    user.getFname() + " " + user.getLname(),
+                    user.getId(), seatNumber, departmentName);
+
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to save assignment: {}", e.getMessage(), e);
+            throw e; // Re-throw to be caught by the caller
+        }
+    }
+
+    /**
+     * Helper method to extract level from department name
+     */
+    private int extractLevel(String departmentName) {
+        // Extract the level number from department name (e.g., "IT 4" -> 4)
+        String[] parts = departmentName.split(" ");
+        for (String part : parts) {
+            if (part.matches("\\d+")) {
+                return Integer.parseInt(part);
+            }
+        }
+        logger.warn("Could not extract level from department name: {}", departmentName);
+        return 0; // Default level if not found
+    }
+
+    /**
+     * Sends email notifications to students about their seat assignments
+     */
+    private void sendEmailNotifications(ExamHole examHole, Set<String> userEmails, Map<Long, String> userSeatMap) {
+        if (userEmails.isEmpty()) {
+            logger.info("No emails to send notifications to");
+            return;
+        }
+
+        logger.info("Sending email notifications to {} users", userEmails.size());
+
+        try {
+            // Create email message
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message);
+
+            helper.setSubject("Exam Hall Assignment - " + examHole.getHoleName());
+
+            // Use the full setFrom method with sender name
+            String fromAddress = "akar.arkanf19@gmail.com";
+            String senderName = "Exam Management System";
+            helper.setFrom(fromAddress, senderName);
+
+            // Use BCC for all recipients to protect privacy
+            String[] emailArray = userEmails.toArray(new String[0]);
+            helper.setBcc(emailArray);
+
+            // Create HTML content
+            String htmlContent = "<html><body style='font-family: Arial, sans-serif;'>" +
+                    "<div style='max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;'>" +
+                    "<h2 style='color: #2c3e50; text-align: center;'>Exam Hall Assignment</h2>" +
+                    "<p>Dear User,</p>" +
+                    "<p>You have been assigned to the upcoming exam in <strong>" +
+                    examHole.getHoleName() + "</strong>.</p>" +
+                    "<p>Your seat assignment can be found by logging into the exam system.</p>" +
+                    "<div style='background-color: #f8f9fa; padding: 15px; margin: 15px 0; border-left: 4px solid #4e73df;'>" +
+                    "<p><strong>Exam Location:</strong> " + examHole.getHoleName() + "</p>" +
+                    "<p><strong>Hall Number:</strong> " + examHole.getNumber() + "</p>" +
+                    "</div>" +
+                    "<p>Please remember to:</p>" +
+                    "<ul>" +
+                    "<li>Bring your ID card</li>" +
+                    "<li>Arrive at least 30 minutes before the exam starts</li>" +
+                    "<li>Turn off mobile phones before entering the exam hall</li>" +
+                    "<li>Bring necessary stationery (pens, pencils, calculator if permitted)</li>" +
+                    "</ul>" +
+                    "<p>Good luck on your exam!</p>" +
+                    "<p style='text-align: center; margin-top: 30px; font-size: 12px; color: #6c757d;'>This is an automated message. Please do not reply to this email.</p>" +
+                    "</div></body></html>";
+
+            helper.setText(htmlContent, true);
+
+            // Send the email
+            mailSender.send(message);
+
+            logger.info("Successfully sent email notifications to users");
+        } catch (MessagingException e) {
+            logger.error("Failed to send email notifications: {}", e.getMessage(), e);
+        } catch (UnsupportedEncodingException e) {
+            logger.error("Failed to set sender name: {}", e.getMessage(), e);
+        }
+    }
 }

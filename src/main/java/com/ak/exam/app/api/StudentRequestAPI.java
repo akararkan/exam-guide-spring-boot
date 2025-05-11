@@ -3,9 +3,11 @@ package com.ak.exam.app.api;
 import com.ak.exam.app.dto.StudentRequestDTO;
 import com.ak.exam.app.model.StudentRequest;
 import com.ak.exam.app.service.StudentRequestService;
+import com.ak.exam.user.model.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +18,7 @@ import java.net.MalformedURLException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/student-requests")
@@ -39,6 +42,13 @@ public class StudentRequestAPI {
     public ResponseEntity<List<StudentRequestDTO>> getAllStudentRequests() {
         // Call the service method to fetch all student requests
         return studentRequestService.getAllStudentRequests();
+    }
+
+    // Endpoint to get all StudentRequests for a specific user
+    @GetMapping("/getStudentRequestsByUserId/{userId}")
+    public ResponseEntity<List<StudentRequestDTO>> getStudentRequestsByUserId(@PathVariable Long userId) {
+        // Call the service method to fetch student requests by user ID
+        return studentRequestService.getStudentRequestsByUserId(userId);
     }
 
     // Endpoint to get a specific StudentRequest by its ID
@@ -65,12 +75,9 @@ public class StudentRequestAPI {
         return studentRequestService.deleteStudentRequest(id);
     }
 
-
-
     // Endpoint to get the image by its filename
     @GetMapping("/images/{fileName}")
     public ResponseEntity<Resource> getImage(@PathVariable String fileName) throws IOException {
         return studentRequestService.getImage(fileName);
     }
-
 }

@@ -32,6 +32,6 @@ public class ExamHoleAssignment {
     @JoinColumn(name = "user_id")
     private User user;
 
-    @Column(name = "seat_number", length = 10) // Set appropriate length
+    @Column(name = "seat_number", length = 100) // Set appropriate length
     private String seatNumber; // Changed from Integer to String
 }

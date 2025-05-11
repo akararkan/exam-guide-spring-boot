@@ -71,6 +71,27 @@ public class StudentRequestService {
         return ResponseEntity.ok(studentRequestDTOs);
     }
 
+    // Method to get all StudentRequests for a specific user (converted to DTOs)
+    public ResponseEntity<List<StudentRequestDTO>> getStudentRequestsByUserId(Long userId) {
+        // Find the user by userId
+        Optional<User> userOptional = userRepository.findById(userId);
+
+        if (userOptional.isEmpty()) {
+            // Return 404 if user not found
+            return ResponseEntity.notFound().build();
+        }
+
+        // Get all requests for this user
+        List<StudentRequest> studentRequests = studentRequestRepository.findByUser(userOptional.get());
+
+        // Convert to DTOs
+        List<StudentRequestDTO> studentRequestDTOs = studentRequests.stream()
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(studentRequestDTOs);
+    }
+
     // Method to get a specific StudentRequest by ID (converted to DTO)
     public ResponseEntity<StudentRequestDTO> getStudentRequestById(Long id) {
         Optional<StudentRequest> studentRequestOptional = studentRequestRepository.findById(id);
@@ -147,7 +168,6 @@ public class StudentRequestService {
     }
 
     // Utility method to handle file upload and return the local file path
-
     private String uploadImageAndGetUrl(MultipartFile attachmentFile) throws IOException {
         if (attachmentFile == null || attachmentFile.isEmpty()) {
             return null; // Return null if no file is uploaded
@@ -171,7 +191,6 @@ public class StudentRequestService {
         return fileName;
     }
 
-
     // Method to get the image file by its name
     public ResponseEntity<Resource> getImage(String fileName) throws IOException {
         // Define the directory where images are stored
@@ -194,7 +213,4 @@ public class StudentRequestService {
             return ResponseEntity.notFound().build();
         }
     }
-
-
-
 }

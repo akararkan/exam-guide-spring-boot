@@ -35,33 +35,56 @@ import java.io.ByteArrayOutputStream;
 public class UserAPI {
 
     private final UserService userService;
-    private static final Logger logger = LoggerFactory.getLogger(UserService.class);
+    private static final Logger logger = LoggerFactory.getLogger(UserAPI.class);
     private final UserRepository userRepository;
     private final DepartmentRepository departmentRepository;
 
     @PostMapping("/addAllUsers")
     public ResponseEntity<List<Token>> addAllUsers(@RequestBody List<User> users) {
         try {
-            // Ensure all users have a department
-            if (users.isEmpty() || users.get(0).getDepartment() == null || users.get(0).getDepartment().getId() == null) {
+            logger.info("Starting to add {} users", users.size());
+
+            // Validate users
+            if (users.isEmpty()) {
+                logger.warn("Empty user list provided");
                 return ResponseEntity.badRequest()
-                        .body(List.of(new Token(null, "Department ID is required for all users")));
+                        .body(List.of(new Token(null, "No users provided")));
             }
 
-            Long departmentId = users.get(0).getDepartment().getId(); // Extract department ID from the first user
+            List<User> newUsers = new ArrayList<>();
+            List<String> errors = new ArrayList<>();
 
-            // Fetch the department using the departmentId
-            Department department = departmentRepository.findById(departmentId)
-                    .orElseThrow(() -> new RuntimeException("Department not found with ID: " + departmentId));
+            for (User user : users) {
+                try {
+                    // Check if user has department set
+                    if (user.getDepartment() == null || user.getDepartment().getId() == null) {
+                        logger.warn("User {} has no department", user.getEmail());
+                        errors.add("User " + user.getEmail() + " has no department");
+                        continue;
+                    }
 
-            // Transform each user using the Builder pattern
-            List<User> newUsers = users.stream().map(user ->
-                    User.builder()
+                    Long departmentId = user.getDepartment().getId();
+                    logger.info("Processing user {} with department ID: {}", user.getEmail(), departmentId);
+
+                    // Fetch the department for this specific user
+                    Department department = departmentRepository.findById(departmentId)
+                            .orElse(null);
+
+                    if (department == null) {
+                        logger.warn("Department not found with ID: {}", departmentId);
+                        errors.add("Department not found with ID: " + departmentId + " for user " + user.getEmail());
+                        continue;
+                    }
+
+                    logger.info("Found department: {} for user: {}", department.getName(), user.getEmail());
+
+                    // Create user with correct department
+                    User newUser = User.builder()
                             .fname(user.getFname())
                             .lname(user.getLname())
                             .username(user.getUsername())
                             .email(user.getEmail())
-                            .password(user.getPassword()) // Ensure encryption if needed
+                            .password(user.getPassword())
                             .phone(user.getPhone())
                             .joinDate(new Date())
                             .isActive(true)
@@ -70,30 +93,52 @@ public class UserAPI {
                             .isVerified(false)
                             .role(user.getRole())
                             .authorities(Collections.singletonList(user.getRole().getAuthorities().toString()))
-                            .department(department)
+                            .department(department)  // Using the department found for this specific user
                             .createDate(new Date())
-                            .build()
-            ).toList();
+                            .build();
 
-            // Save all users in batch
-            userRepository.saveAll(newUsers);
+                    newUsers.add(newUser);
+                    logger.debug("Added user {} to the batch with department {}",
+                            newUser.getEmail(), newUser.getDepartment().getName());
 
-            // Generate tokens for each user (if applicable)
-            List<Token> responses = newUsers.stream().map(user -> Token.builder()
-                    .token(null) // Generate token if needed
-                    .response("User " + user.getEmail() + " added successfully.")
+                } catch (Exception e) {
+                    logger.error("Error processing user {}: {}", user.getEmail(), e.getMessage());
+                    errors.add("Error processing user " + user.getEmail() + ": " + e.getMessage());
+                }
+            }
+
+            if (newUsers.isEmpty()) {
+                logger.warn("No valid users to add after processing");
+                return ResponseEntity.badRequest()
+                        .body(List.of(new Token(null, "No valid users to add. Errors: " + String.join(", ", errors))));
+            }
+
+            // Save all valid users in batch
+            logger.info("Saving {} users to database", newUsers.size());
+            List<User> savedUsers = userRepository.saveAll(newUsers);
+            logger.info("Successfully saved {} users", savedUsers.size());
+
+            // Generate tokens for each user
+            List<Token> responses = savedUsers.stream().map(user -> Token.builder()
+                    .token(null)
+                    .response("User " + user.getEmail() + " added successfully with department " +
+                            user.getDepartment().getName())
                     .build()).toList();
+
+            // If there were errors, add them to the response
+            if (!errors.isEmpty()) {
+                responses = new ArrayList<>(responses);
+                responses.add(new Token(null, "Warnings: " + String.join(", ", errors)));
+            }
 
             return ResponseEntity.status(HttpStatus.CREATED).body(responses);
 
         } catch (Exception e) {
-            logger.error("Error adding users: {}", e.getMessage());
+            logger.error("Error adding users: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(List.of(new Token(null, "Error adding users: " + e.getMessage())));
         }
     }
-
-
 
     @PostMapping("/register/{departmentId}")
     public ResponseEntity<Token> register(@RequestBody User user, @PathVariable Long departmentId, HttpServletRequest request) throws Exception {
@@ -137,7 +182,7 @@ public class UserAPI {
                         .password(user.getPassword())
                         .role(user.getRole().name())
                         .username(user.getUsername())
-                        .departmentId(user.getDepartment() != null ? user.getDepartment().getId() : null) // Map department ID
+                        .departmentId(user.getDepartment() != null ? user.getDepartment().getId() : null)
                         .joinDate(new Date())
                         .lastLoginDate(user.getLastLoginDate())
                         .build())
@@ -162,7 +207,7 @@ public class UserAPI {
         userService.deleteUser(id);
         return ResponseEntity.noContent().build();
     }
-    // Add the new endpoint for resetting the password
+
     @PostMapping("/resetPassword")
     public ResponseEntity<Token> resetPassword(@RequestParam String email, @RequestParam String newPassword) {
         return userService.resetPassword(email, newPassword);
@@ -256,7 +301,7 @@ public class UserAPI {
             return new ResponseEntity<>(excelContent, headers, HttpStatus.OK);
 
         } catch (Exception e) {
-            logger.error("Error exporting users to Excel: {}", e.getMessage());
+            logger.error("Error exporting users to Excel: {}", e.getMessage(), e);
             return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
@@ -264,54 +309,123 @@ public class UserAPI {
     @PostMapping("/importUsers")
     public ResponseEntity<List<Token>> importUsersFromExcel(@RequestPart("file") MultipartFile file) {
         try {
+            logger.info("Starting Excel import process");
             // Load workbook
             XSSFWorkbook workbook = new XSSFWorkbook(file.getInputStream());
             XSSFSheet sheet = workbook.getSheetAt(0);
 
             List<User> users = new ArrayList<>();
+            Map<String, Department> departmentCache = new HashMap<>();
+            int totalRows = sheet.getLastRowNum();
+
+            logger.info("Found {} rows in the Excel sheet", totalRows);
 
             // Assuming first row is header
-            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+            for (int i = 1; i <= totalRows; i++) {
                 Row row = sheet.getRow(i);
-                if (row == null) continue;
+                if (row == null) {
+                    logger.debug("Row {} is null, skipping", i);
+                    continue;
+                }
 
-                // Read department ID - assuming it's in column 7
-                String departmentName = row.getCell(7) != null ?
-                        row.getCell(7).getStringCellValue() : null;
+                logger.info("Processing row: {}", i);
 
+                // Read department name - assuming it's in column 7
+                Cell departmentCell = row.getCell(7);
                 Department department = null;
-                if (departmentName != null && !departmentName.isEmpty()) {
-                    department = departmentRepository.findByName(departmentName);
+                String departmentName = null;
+
+                if (departmentCell != null) {
+                    departmentName = getCellStringValue(departmentCell);
+                    logger.info("Row {}: Department value: '{}'", i, departmentName);
+
+                    if (departmentName != null && !departmentName.isEmpty()) {
+                        // Use cached department if we've seen this name before
+                        if (departmentCache.containsKey(departmentName)) {
+                            department = departmentCache.get(departmentName);
+                            logger.info("Row {}: Using cached department '{}' with ID {}",
+                                    i, departmentName, department.getId());
+                        } else {
+                            // Find the department by name
+                            department = departmentRepository.findByName(departmentName);
+
+                            if (department != null) {
+                                // Cache it for future rows
+                                departmentCache.put(departmentName, department);
+                                logger.info("Row {}: Found department '{}' with ID {}",
+                                        i, departmentName, department.getId());
+                            } else {
+                                logger.warn("Row {}: Department '{}' not found in database", i, departmentName);
+                            }
+                        }
+                    } else {
+                        logger.warn("Row {}: Empty department name", i);
+                    }
                 }
 
                 // Create user from row data
+                String roleStr = getCellStringValue(row.getCell(6));
+                Role role = null;
+                if (roleStr != null && !roleStr.isEmpty()) {
+                    try {
+                        role = Role.valueOf(roleStr);
+                        logger.info("Row {}: Role value: '{}'", i, roleStr);
+                    } catch (IllegalArgumentException e) {
+                        logger.warn("Row {}: Invalid role value: '{}'", i, roleStr);
+                    }
+                }
+
+                String fname = getCellStringValue(row.getCell(1));
+                String lname = getCellStringValue(row.getCell(2));
+                String username = getCellStringValue(row.getCell(3));
+                String email = getCellStringValue(row.getCell(4));
+                String phone = getCellStringValue(row.getCell(5));
+                String password = getCellStringValue(row.getCell(8));
+
+                logger.info("Row {}: Creating user: {}, {}, {}", i, fname, lname, email);
+
                 User user = User.builder()
-                        .fname(getCellStringValue(row.getCell(1)))
-                        .lname(getCellStringValue(row.getCell(2)))
-                        .username(getCellStringValue(row.getCell(3)))
-                        .email(getCellStringValue(row.getCell(4)))
-                        .phone(getCellStringValue(row.getCell(5)))
-                        .role(getCellStringValue(row.getCell(6)) != null ?
-                                Role.valueOf(getCellStringValue(row.getCell(6))) : null)
-                        .department(department)
+                        .fname(fname)
+                        .lname(lname)
+                        .username(username)
+                        .email(email)
+                        .phone(phone)
+                        .role(role)
+                        .department(department) // This will be the specific department for this user
+                        .password(password)
                         .joinDate(new Date())
                         .isActive(true)
                         .isNotLocked(true)
                         .isEnabled(false)
-                        .isVerified(false)
+                        .isVerified(true)
                         .createDate(new Date())
                         .build();
+
+                if (department != null) {
+                    logger.info("Row {}: User {} assigned to department {} with ID {}",
+                            i, email, department.getName(), department.getId());
+                } else {
+                    logger.warn("Row {}: User {} has no department assigned", i, email);
+                }
 
                 users.add(user);
             }
 
             workbook.close();
 
-            // Use your existing method to add the users
+            logger.info("Excel processing complete. Created {} user objects", users.size());
+
+            if (users.isEmpty()) {
+                logger.warn("No valid users found in the Excel file");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(List.of(new Token(null, "No valid users found in the Excel file")));
+            }
+
+            // Add the users using the improved method
             return addAllUsers(users);
 
         } catch (Exception e) {
-            logger.error("Error importing users from Excel: {}", e.getMessage());
+            logger.error("Error importing users from Excel: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(List.of(new Token(null, "Error importing users: " + e.getMessage())));
         }
@@ -321,15 +435,41 @@ public class UserAPI {
         if (cell == null) {
             return null;
         }
-        switch (cell.getCellType()) {
-            case STRING:
-                return cell.getStringCellValue();
-            case NUMERIC:
-                return String.valueOf((long) cell.getNumericCellValue());
-            default:
-                return null;
+
+        try {
+            switch (cell.getCellType()) {
+                case STRING:
+                    return cell.getStringCellValue().trim();
+                case NUMERIC:
+                    if (DateUtil.isCellDateFormatted(cell)) {
+                        return cell.getDateCellValue().toString();
+                    } else {
+                        // Check if it's a whole number
+                        double value = cell.getNumericCellValue();
+                        if (value == Math.floor(value)) {
+                            return String.valueOf((long) value);
+                        } else {
+                            return String.valueOf(value);
+                        }
+                    }
+                case BOOLEAN:
+                    return String.valueOf(cell.getBooleanCellValue());
+                case FORMULA:
+                    try {
+                        return cell.getStringCellValue().trim();
+                    } catch (Exception e) {
+                        try {
+                            return String.valueOf(cell.getNumericCellValue());
+                        } catch (Exception ex) {
+                            return "";
+                        }
+                    }
+                default:
+                    return "";
+            }
+        } catch (Exception e) {
+            logger.error("Error reading cell value: {}", e.getMessage(), e);
+            return "";
         }
     }
-
-
 }

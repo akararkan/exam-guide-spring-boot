@@ -27,15 +27,7 @@ public class Department {
     private String description;
     private Integer level;
     private Date createdAt;
-    private Date updatedAt;@ManyToOne(fetch = FetchType.LAZY , optional = false)
-    @JoinColumn(name = "semesterSchedule_id" , nullable = false)
-    @JsonBackReference("semesterSchedule-course")
-    private SemesterSchedule semesterSchedule;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    @JsonBackReference("user-course")
-    private User user;
+    private Date updatedAt;
 
     // One Department can have many Users
     @OneToMany(mappedBy = "department", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)

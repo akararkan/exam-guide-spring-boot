@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -180,9 +181,99 @@ public class ExamHoleAssignmentAPI {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error updating seat number: " + e.getMessage());
         }
     }
-    @PostMapping("/assign-users/{examHoleID}")
-    public void assignSeats(@PathVariable Long examHoleID){
-        examHoleService.distributeUsersToSeats(examHoleID);
+
+    /**
+     * Assigns seats automatically with default level grouping (1&3 together, 2&4 together)
+     *
+     * @param examHoleID The ID of the exam hole
+     * @param requestBody Contains the selected departments
+     * @return Response with status and message
+     */
+    @PostMapping("/assign-seats/{examHoleID}")
+    public ResponseEntity<Map<String, Object>> assignSeats(
+            @PathVariable Long examHoleID,
+            @RequestBody Map<String, List<String>> requestBody) {
+
+        try {
+            List<String> selectedDepartments = requestBody.get("departments");
+
+            if (selectedDepartments == null || selectedDepartments.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of(
+                                "status", "error",
+                                "message", "No departments selected"
+                        ));
+            }
+
+            // Use the default grouping: Levels 1&3 together, Levels 2&4 together
+            examHoleService.distributeUsersToSeats(examHoleID, selectedDepartments);
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "success",
+                    "message", "Seat distribution completed successfully"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of(
+                            "status", "error",
+                            "message", e.getMessage()
+                    ));
+        }
+    }
+
+    /**
+     * Assigns seats with custom level grouping
+     *
+     * @param examHoleID The ID of the exam hole
+     * @param requestBody Contains selected departments and level groups
+     * @return Response with status and message
+     */
+    @PostMapping("/assign-seats-custom/{examHoleID}")
+    public ResponseEntity<Map<String, Object>> assignSeatsCustom(
+            @PathVariable Long examHoleID,
+            @RequestBody Map<String, Object> requestBody) {
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<String> selectedDepartments = (List<String>) requestBody.get("departments");
+
+            @SuppressWarnings("unchecked")
+            List<Integer> firstLevelGroup = (List<Integer>) requestBody.get("firstLevelGroup");
+
+            @SuppressWarnings("unchecked")
+            List<Integer> secondLevelGroup = (List<Integer>) requestBody.get("secondLevelGroup");
+
+            if (selectedDepartments == null || selectedDepartments.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of(
+                                "status", "error",
+                                "message", "No departments selected"
+                        ));
+            }
+
+            if (firstLevelGroup == null || firstLevelGroup.isEmpty() ||
+                    secondLevelGroup == null || secondLevelGroup.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of(
+                                "status", "error",
+                                "message", "Level groups must be specified"
+                        ));
+            }
+
+            // Use custom level grouping
+            examHoleService.distributeUsersToSeats(examHoleID, selectedDepartments, firstLevelGroup, secondLevelGroup);
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "success",
+                    "message", "Seat distribution completed successfully"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of(
+                            "status", "error",
+                            "message", e.getMessage()
+                    ));
+        }
     }
 
 
